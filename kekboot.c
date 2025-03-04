@@ -58,8 +58,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
      *
      *  Try SMBIOS v3.x first and fall back to v1.x if not available
      */
-    const EFI_STATUS Status = LibGetSystemConfigurationTable(&SMBIOS3TableGuid, (VOID**)&Smbios3Table);
-    if (Status == EFI_SUCCESS) {
+    const EFI_STATUS smbiosTableStatus = LibGetSystemConfigurationTable(&SMBIOS3TableGuid, (VOID**)&Smbios3Table);
+    if (smbiosTableStatus == EFI_SUCCESS) {
         Smbios.Hdr = (SMBIOS_HEADER*)Smbios3Table->TableAddress;
         // Print some useful information
         Print(L"SMBIOS Version: %u - %u - %u\n", Smbios3Table->MajorVersion, Smbios3Table->MinorVersion, Smbios3Table->DocRev);
