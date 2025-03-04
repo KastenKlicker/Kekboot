@@ -1,4 +1,6 @@
 *
 !.gitignore
 !kekboot.c
+!parse_config.c
+!parse_config.h
 !Makefile
