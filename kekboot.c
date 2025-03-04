@@ -15,6 +15,7 @@
         if (Status != EFI_SUCCESS)                                                      \
         {                                                                               \
             Print(L"EFI_ERROR: %r\n", Status);                                          \
+            Print(L"Error in line: %d\n", __LINE__);                                    \
             Print(L"Press any key to continue.");                                       \
             /* Now wait for a keystroke before continuing, otherwise your
             message will flash off the screen before you see it.
@@ -33,6 +34,35 @@
             return Status;                                                              \
         }                                                                               \
     }                                                                                    
+
+void SplitStringToWords(CHAR16 *input, CHAR16 **output, int *wordCount) {
+    int i = 0;
+    *wordCount = 0;
+
+    while (input[i] != '\0') {
+        // Überspringe führende Leerzeichen
+        while (input[i] == L' ') {
+            i++;
+        }
+
+        // Speicheradresse des Wortanfangs
+        if (input[i] != '\0') {
+            output[*wordCount] = &input[i];
+            (*wordCount)++;
+        }
+
+        // Finde das Ende des Wortes
+        while (input[i] != L' ' && input[i] != '\0') {
+            i++;
+        }
+
+        // Ersetze das Ende des Worts mit Nullterminierung
+        if (input[i] != '\0') {
+            input[i] = '\0';
+            i++;
+        }
+    }
+}
 
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 {
@@ -93,17 +123,73 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     /*
      * Set boot device based on WakeUpType
      */
-    EFI_GUID GlobalVariable = EFI_GLOBAL_VARIABLE; // GUID for UEFI boot values
-    UINT16 BootNext = 0;
-
-    if (WakeUpType == 0x06) {
-        BootNext = 0x0001; // Ubuntu
-    } else {
-        BootNext = 0x0000; // Windows
+    //EFI_GUID GlobalVariable = EFI_GLOBAL_VARIABLE; // GUID for UEFI boot values
+    CHAR16 BootNext = 0;
+    //UINTN BootMappingSize = 0;
+    CHAR16 *BootMapping;
+    
+    // Get Wake-up Type to Boot Option mapping
+    //BootMapping = LibGetVariableAndSize(L"WakeUpType", &GlobalVariable, &BootMappingSize);
+    BootMapping = L"null eins zwei drei vier fünf sechs sieben acht";
+    if(!BootMapping) {
+      Print(L"Could not get Boot Mapping\n");
+      CALL(EFI_ABORTED);
     }
+    
+    CHAR16 *BootMappingWords[9];
+    int wordCount = 0;
+    
+    SplitStringToWords(BootMapping, BootMappingWords, &wordCount);
+    
+    BootNext = *BootMappingWords[WakeUpType];
+    
+    EFI_HANDLE LoadedImageHandle;
+    EFI_LOADED_IMAGE_PROTOCOL *LoadedImage;
+    EFI_DEVICE_PATH *DevicePath;
+    
+    // Get the loaded image protocol for the current image
+    CALL(uefi_call_wrapper(
+        SystemTable->BootServices->OpenProtocol,
+        6,
+        ImageHandle,
+        &LoadedImageProtocol,
+        (VOID **)&LoadedImage,
+        ImageHandle,
+        NULL,
+        EFI_OPEN_PROTOCOL_GET_PROTOCOL
+    ));
+    
+    DevicePath = FileDevicePath(
+        LoadedImage->DeviceHandle,
+        &BootNext
+    );
+    
+    if (!DevicePath) {
+      Print(L"Could not get Device Path\n");
+      CALL(EFI_ABORTED);
+    }
+    
+    CALL(uefi_call_wrapper(
+        SystemTable->BootServices->LoadImage,
+        6,
+        FALSE,
+        ImageHandle,
+        DevicePath,
+        NULL,
+        0,
+        &LoadedImageHandle
+    ));
+    
+    CALL(uefi_call_wrapper(
+        SystemTable->BootServices->StartImage,
+        3,
+        LoadedImageHandle,
+        NULL,
+        NULL
+    ));
 
     // Set BootNext variable
-     CALL(ST->RuntimeServices->SetVariable(
+    /* CALL(ST->RuntimeServices->SetVariable(
         L"BootNext",
         &GlobalVariable,
         EFI_VARIABLE_NON_VOLATILE |
@@ -121,7 +207,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
                 EFI_SUCCESS,
                 0,
                 NULL
-            )); 
+            )); */
 
     return EFI_SUCCESS;
 }
