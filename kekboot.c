@@ -32,7 +32,34 @@
                 ST->ConIn->ReadKeyStroke(ST->ConIn, &Key);                              \
             return Status;                                                              \
         }                                                                               \
-    }                                                                                    
+    }
+
+UINT64 FileSize(EFI_FILE_HANDLE FileHandle)
+{
+    UINT64 ret;
+    EFI_FILE_INFO       *FileInfo;         /* file information structure */
+    /* get the file's size */
+    FileInfo = LibFileInfo(FileHandle);
+    ret = FileInfo->FileSize;
+    FreePool(FileInfo);
+    return ret;
+}
+
+EFI_FILE_HANDLE GetVolume(EFI_HANDLE image)
+{
+    Print(L"Getting volume handle\n");
+    EFI_LOADED_IMAGE *loaded_image = NULL;                  /* image interface */
+    EFI_GUID lipGuid = EFI_LOADED_IMAGE_PROTOCOL_GUID;      /* image interface GUID */
+
+    /* get the loaded image protocol interface for our "image" */
+    EFI_STATUS statusOf = uefi_call_wrapper(BS->HandleProtocol, 3, image, &lipGuid, (void **) &loaded_image);
+    if (!loaded_image || statusOf != EFI_SUCCESS) {
+      Print(L"Failed to get loaded image protocol\n");
+      return NULL;
+    }
+    /* get the volume handle */
+    return LibOpenRoot(loaded_image->DeviceHandle);
+}
 
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 {
@@ -89,6 +116,72 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         Print(L"No valid SMBIOS WakeUpTpye entry found\n");
         CALL(EFI_NOT_FOUND);
     }
+    
+    /*
+     * Read configuration
+     * 
+     * Get volume handle
+     */
+    EFI_FILE_HANDLE Volume = GetVolume(ImageHandle);
+    
+    if (Volume == NULL) {
+      Print(L"Failed to get volume handle\n");
+      CALL(EFI_NOT_FOUND);
+    }
+    
+    // Open file
+    CHAR16              *FileName = L"EFI\\BOOT\\KEKBOOT.INI";
+    EFI_FILE_HANDLE     FileHandle;
+    
+    uefi_call_wrapper(Volume->Open, 5, Volume, &FileHandle, FileName, EFI_FILE_MODE_READ, EFI_FILE_READ_ONLY | EFI_FILE_HIDDEN | EFI_FILE_SYSTEM);
+    Print(L"Opened file %s\n", FileName);
+    
+    if (FileHandle == NULL) {
+      Print(L"Failed to open file %s\n", FileName);
+      CALL(EFI_NOT_FOUND);
+    }
+
+    // Read file
+    UINT64              ReadSize = FileSize(FileHandle);
+    Print(L"File size: %llu\n", ReadSize);
+    UINT8               *Buffer = AllocatePool(ReadSize);
+    Print(L"Allocated buffer\n");
+
+    uefi_call_wrapper(FileHandle->Read, 3, FileHandle, &ReadSize, Buffer);
+    Print(L"Read file %s\n", FileName);
+    
+    // Close file
+    uefi_call_wrapper(FileHandle->Close, 1, FileHandle);
+    Print(L"Closed file %s\n", FileName);
+
+    // Print contents of the read file
+    UINT8 *CurrentPtr = Buffer;
+    UINT64 RemainingSize = ReadSize;
+
+    // Ensure the buffer is null-terminated for secure string printing
+    Buffer[ReadSize] = '\0';
+
+    while (RemainingSize > 0) {
+        CHAR16 OutputBuffer[128]; // Create a buffer to hold the output (convert to CHAR16)
+        UINT64 CopyLength = sizeof(OutputBuffer) / sizeof(CHAR16) - 1;
+
+        if (RemainingSize < CopyLength) {
+            CopyLength = RemainingSize;
+        }
+
+        for (UINT64 i = 0; i < CopyLength; ++i) {
+            OutputBuffer[i] = (CHAR16)CurrentPtr[i]; // Convert ASCII to CHAR16
+        }
+        OutputBuffer[CopyLength] = L'\0'; // Null-terminate the string
+
+        Print(L"%s", OutputBuffer);
+
+        CurrentPtr += CopyLength;
+        RemainingSize -= CopyLength;
+    }
+
+    // Free the allocated buffer
+    FreePool(Buffer);
 
     /*
      * Set boot device based on WakeUpType
