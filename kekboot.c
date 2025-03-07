@@ -40,7 +40,7 @@ void SplitStringToWords(CHAR16 *input, CHAR16 **output, int *wordCount) {
     int i = 0;
     *wordCount = 0;
 
-    while (input[i] != '\0') {
+    while (input[i] != '\0' && *wordCount < 9) {
         // Überspringe führende Leerzeichen
         while (input[i] == L' ') {
             i++;
@@ -131,7 +131,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     
     // Get Wake-up Type to Boot Option mapping
     BootMapping = LibGetVariableAndSize(L"WakeUpType", &Vendor_GUID, &BootMappingSize);
-    // BootMapping = L"null eins zwei drei vier fünf sechs sieben acht";
+    //BootMapping = L"null eins zwei drei vier fünf sechs sieben acht";
     if(!BootMapping) {
       Print(L"Could not get Boot Mapping\n");
       CALL(EFI_ABORTED);
