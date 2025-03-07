@@ -14,8 +14,9 @@
         EFI_INPUT_KEY Key;                                                              \
         if (Status != EFI_SUCCESS)                                                      \
         {                                                                               \
-            Print(L"EFI_ERROR: %r\n", Status);                                          \
+            Print(L"Error in file: %a\n", __FILE__);                               		\
             Print(L"Error in line: %d\n", __LINE__);                                    \
+            Print(L"Error in call: %a\n", #call);                                       \
             Print(L"Press any key to continue.");                                       \
             /* Now wait for a keystroke before continuing, otherwise your
             message will flash off the screen before you see it.
@@ -123,14 +124,14 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     /*
      * Set boot device based on WakeUpType
      */
-    //EFI_GUID GlobalVariable = EFI_GLOBAL_VARIABLE; // GUID for UEFI boot values
+    EFI_GUID Vendor_GUID = { 0x1BE4DF61, 0x93CA, 0x11d2, {0xAA, 0x0D, 0x00, 0xE0, 0x98, 0x03, 0x2B, 0x8C} };
     CHAR16 BootNext = 0;
-    //UINTN BootMappingSize = 0;
+    UINTN BootMappingSize = 0;
     CHAR16 *BootMapping;
     
     // Get Wake-up Type to Boot Option mapping
-    //BootMapping = LibGetVariableAndSize(L"WakeUpType", &GlobalVariable, &BootMappingSize);
-    BootMapping = L"null eins zwei drei vier fünf sechs sieben acht";
+    BootMapping = LibGetVariableAndSize(L"WakeUpType", &Vendor_GUID, &BootMappingSize);
+    // BootMapping = L"null eins zwei drei vier fünf sechs sieben acht";
     if(!BootMapping) {
       Print(L"Could not get Boot Mapping\n");
       CALL(EFI_ABORTED);
@@ -141,16 +142,20 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     
     SplitStringToWords(BootMapping, BootMappingWords, &wordCount);
     
+    for (int i = 0; i < wordCount; i++) {
+      Print(L"Wake-up Type 0x%02x : Bootfile %s\n", i, BootMappingWords[i]);
+    }
+    
     BootNext = *BootMappingWords[WakeUpType];
+    Print(L"BootNext: %s\n", BootNext);
     
     EFI_HANDLE LoadedImageHandle;
     EFI_LOADED_IMAGE_PROTOCOL *LoadedImage;
     EFI_DEVICE_PATH *DevicePath;
     
     // Get the loaded image protocol for the current image
-    CALL(uefi_call_wrapper(
-        SystemTable->BootServices->OpenProtocol,
-        6,
+    CALL(
+        SystemTable->BootServices->OpenProtocol(
         ImageHandle,
         &LoadedImageProtocol,
         (VOID **)&LoadedImage,
@@ -169,9 +174,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
       CALL(EFI_ABORTED);
     }
     
-    CALL(uefi_call_wrapper(
-        SystemTable->BootServices->LoadImage,
-        6,
+    CALL(
+        SystemTable->BootServices->LoadImage(
         FALSE,
         ImageHandle,
         DevicePath,
@@ -180,9 +184,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         &LoadedImageHandle
     ));
     
-    CALL(uefi_call_wrapper(
-        SystemTable->BootServices->StartImage,
-        3,
+    CALL(
+        SystemTable->BootServices->StartImage(
         LoadedImageHandle,
         NULL,
         NULL
