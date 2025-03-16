@@ -69,6 +69,56 @@ void SplitStringToWords(CHAR16 sperator, UINT8 expectedWordCount, CHAR16 *input,
     }
 }
 
+/* 
+ * Helper function to convert a hex-character string to an integer
+ */
+UINT32 HexStringToInt(CHAR16 *str, UINTN length) {
+    UINT32 result = 0;
+
+    for (UINTN i = 0; i < length; ++i) {
+        result <<= 4;  // Shift left by 4 bits to make room for next nibble
+
+        if (str[i] >= L'0' && str[i] <= L'9') {
+            result |= (str[i] - L'0');
+        } else if (str[i] >= L'A' && str[i] <= L'F') {
+            result |= (str[i] - L'A' + 10);
+        } else if (str[i] >= L'a' && str[i] <= L'f') {
+            result |= (str[i] - L'a' + 10);
+        }
+    }
+
+    return result;
+}
+
+/*
+ * Function to convert a CHAR16 GUID string to an EFI_GUID structure
+ */
+EFI_GUID ConvertGuidStringToEfiGuid(CHAR16 *guidString) {
+    EFI_GUID guid;
+
+    // Ensure the input string matches the expected GUID format
+    if (!guidString || StrLen(guidString) != 36 ||
+        guidString[8] != L'-' || guidString[13] != L'-' || guidString[18] != L'-' || guidString[23] != L'-') {
+        Print(L"Invalid GUID format\n");
+        return (EFI_GUID){0}; // Return all zero GUID on failure
+    }
+
+    // Parse the GUID fields (big-endian format)
+    guid.Data1 = HexStringToInt(guidString, 8);
+    guid.Data2 = (UINT16)HexStringToInt(guidString + 9, 4);
+    guid.Data3 = (UINT16)HexStringToInt(guidString + 14, 4);
+
+    // Data4: the first two bytes and the last six bytes
+    guid.Data4[0] = (UINT8)HexStringToInt(guidString + 19, 2);
+    guid.Data4[1] = (UINT8)HexStringToInt(guidString + 21, 2);
+
+    for (int i = 0; i < 6; ++i) {
+        guid.Data4[i + 2] = (UINT8)HexStringToInt(guidString + 24 + (i * 2), 2);
+    }
+
+    return guid;
+}
+
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 {
 
@@ -133,7 +183,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     CHAR16 *BootMapping;
     
     // Get Wake-up Type to Boot Option mapping
-    BootMapping = LibGetVariableAndSize(L"TestVar", &Vendor_GUID, &BootMappingSize);
+    BootMapping = LibGetVariableAndSize(L"WakeUpType", &Vendor_GUID, &BootMappingSize);
     if(!BootMapping) {
       Print(L"Could not get Boot Mapping\n");
       CALL(EFI_ABORTED);
@@ -160,8 +210,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     Print(L"BootNext: %s\n", BootFile);
     
     // The GUID of the EFI partition to load
-    // TODO Replace hardcoded GUID against efivar configuration
-    EFI_GUID DiskGuid = { 0x10cf4871, 0xc6e0, 0x4216, { 0xb9, 0xe0, 0xb5, 0xd4, 0x17, 0xe3, 0x40, 0x86 } };
+    EFI_GUID DiskGuid = ConvertGuidStringToEfiGuid(BootMappingConfig[0]);
     
     EFI_HANDLE *DiskHandles;
     UINTN HandleCount;
