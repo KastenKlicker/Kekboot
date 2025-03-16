@@ -37,28 +37,31 @@
         }                                                                               \
     }                                                                                    
 
+/*
+ * Splits a CHAR16 array in words at whitespaces
+ */
 void SplitStringToWords(CHAR16 *input, CHAR16 **output, int *wordCount) {
     int i = 0;
     *wordCount = 0;
 
     while (input[i] != '\0' && *wordCount < 9) {
-        // Überspringe führende Leerzeichen
+        // Ignore leading whitespaces
         while (input[i] == L' ') {
             i++;
         }
 
-        // Speicheradresse des Wortanfangs
+        // Adress of word beginning
         if (input[i] != '\0') {
             output[*wordCount] = &input[i];
             (*wordCount)++;
         }
 
-        // Finde das Ende des Wortes
+        // Get end of word
         while (input[i] != L' ' && input[i] != '\0') {
             i++;
         }
 
-        // Ersetze das Ende des Worts mit Nullterminierung
+        // Add terminating NULL character
         if (input[i] != '\0') {
             input[i] = '\0';
             i++;
@@ -132,7 +135,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     
     // Get Wake-up Type to Boot Option mapping
     BootMapping = LibGetVariableAndSize(L"TestVar", &Vendor_GUID, &BootMappingSize);
-    // BootMapping = L"null eins zwei drei vier fünf sechs sieben acht";
     if(!BootMapping) {
       Print(L"Could not get Boot Mapping\n");
       CALL(EFI_ABORTED);
@@ -143,19 +145,24 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     
     SplitStringToWords(BootMapping, BootMappingWords, &wordCount);
     
+    // Mapping for debugging purposes
     for (int i = 0; i < wordCount; i++) {
       Print(L"Wake-up Type 0x%02x : Bootfile %s\n", i, BootMappingWords[i]);
     }
     
+    // The actual mapping
     BootNext = BootMappingWords[WakeUpType];
     Print(L"BootNext: %s\n", BootNext);
     
+    // The GUID of the EFI partition to load
+    // TODO Replace hardcoded GUID against efivar configuration
     EFI_GUID DiskGuid = { 0x10cf4871, 0xc6e0, 0x4216, { 0xb9, 0xe0, 0xb5, 0xd4, 0x17, 0xe3, 0x40, 0x86 } };
     
     EFI_HANDLE *DiskHandles;
     UINTN HandleCount;
     EFI_DEVICE_PATH *DevicePath;
 
+    // Find the EFI partition by GUID
     CALL(LibLocateHandleByDiskSignature(MBR_TYPE_EFI_PARTITION_TABLE_HEADER, SIGNATURE_TYPE_GUID, &DiskGuid, &HandleCount, &DiskHandles));
 
     Print(L"Found %d EFI partitions\n", HandleCount);
@@ -170,16 +177,16 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
       CALL(EFI_NOT_FOUND);
     }
     
-    // Erstelle einen Gerätepfad aus dem Handle
+    // Get device path of EFI partition
     DevicePath = DevicePathFromHandle(DiskHandles[0]);
     if (!DevicePath) {
         Print(L"Failed to create device path!\n");
         CALL(EFI_NOT_FOUND);
     }
 
-    // Konvertiere und drucke den Gerätepfad in eine UTF-16-String-Repräsentation
     Print(L"Device Path: %s\n", DevicePathToStr(DevicePath));
 
+    // Get file path of EFI application to chainload
     EFI_DEVICE_PATH *FilePath = FileDevicePath(DiskHandles[0], BootNext);
     if (!FilePath) {
         Print(L"Unable to build file path.\n");
@@ -190,6 +197,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     
     EFI_HANDLE LoadedImageHandle;
     
+    // Load efi application into memory
     CALL(
         SystemTable->BootServices->LoadImage(
         FALSE,				// BootPolicy
@@ -200,6 +208,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         &LoadedImageHandle  // ImageHandle
     ));
     
+    // Run loaded efi application
     CALL(
         SystemTable->BootServices->StartImage(
         LoadedImageHandle,
