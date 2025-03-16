@@ -1,7 +1,7 @@
 # KekBoot
 KekBoot decides the boot OS by checking the WakeUpType reported by the SMBIOS.
 
-This works by setting the BootNext efivar and rebooting the system.
+This works by chainloading the wanted OS.
 
 ### How to build
 1. Clone the GNU EFI repository and follow the instructions the README.gnuefi.
