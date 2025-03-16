@@ -40,13 +40,13 @@
 /*
  * Splits a CHAR16 array in words at whitespaces
  */
-void SplitStringToWords(CHAR16 *input, CHAR16 **output, int *wordCount) {
+void SplitStringToWords(CHAR16 sperator, UINT8 expectedWordCount, CHAR16 *input, CHAR16 **output, int *wordCount) {
     int i = 0;
     *wordCount = 0;
 
-    while (input[i] != '\0' && *wordCount < 9) {
+    while (input[i] != '\0' && *wordCount < expectedWordCount) {
         // Ignore leading whitespaces
-        while (input[i] == L' ') {
+        while (input[i] == sperator) {
             i++;
         }
 
@@ -57,7 +57,7 @@ void SplitStringToWords(CHAR16 *input, CHAR16 **output, int *wordCount) {
         }
 
         // Get end of word
-        while (input[i] != L' ' && input[i] != '\0') {
+        while (input[i] != sperator && input[i] != '\0') {
             i++;
         }
 
@@ -143,7 +143,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     CHAR16 *BootMappingWords[9];
     int wordCount = 0;
     
-    SplitStringToWords(BootMapping, BootMappingWords, &wordCount);
+    SplitStringToWords(L' ', 9, BootMapping, BootMappingWords, &wordCount);
     
     // Mapping for debugging purposes
     for (int i = 0; i < wordCount; i++) {
