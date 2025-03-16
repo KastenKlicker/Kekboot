@@ -14,7 +14,10 @@
         EFI_INPUT_KEY Key;                                                              \
         if (Status != EFI_SUCCESS)                                                      \
         {                                                                               \
-            Print(L"EFI_ERROR: %r\n", Status);                                          \
+			Print(L"EFI Error: %r\n", Status);											\
+            Print(L"Error in file: %a\n", __FILE__);                               		\
+            Print(L"Error in line: %d\n", __LINE__);                                    \
+            Print(L"Error in call: %a\n", #call);                                       \
             Print(L"Press any key to continue.");                                       \
             /* Now wait for a keystroke before continuing, otherwise your
             message will flash off the screen before you see it.
@@ -33,6 +36,35 @@
             return Status;                                                              \
         }                                                                               \
     }                                                                                    
+
+void SplitStringToWords(CHAR16 *input, CHAR16 **output, int *wordCount) {
+    int i = 0;
+    *wordCount = 0;
+
+    while (input[i] != '\0' && *wordCount < 9) {
+        // Überspringe führende Leerzeichen
+        while (input[i] == L' ') {
+            i++;
+        }
+
+        // Speicheradresse des Wortanfangs
+        if (input[i] != '\0') {
+            output[*wordCount] = &input[i];
+            (*wordCount)++;
+        }
+
+        // Finde das Ende des Wortes
+        while (input[i] != L' ' && input[i] != '\0') {
+            i++;
+        }
+
+        // Ersetze das Ende des Worts mit Nullterminierung
+        if (input[i] != '\0') {
+            input[i] = '\0';
+            i++;
+        }
+    }
+}
 
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 {
@@ -66,7 +98,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         Print(L"SMBIOS Entry Point Revision: %u\n", Smbios3Table->EntryPointRevision);
     } else {
         CALL(LibGetSystemConfigurationTable(&SMBIOSTableGuid, (VOID**)&SmbiosTable));
-        Print(L"Major SMBIOS Version: %u\n", SmbiosTable->MajorVersion);
+        Print(L"SMBIOS Version: %u - %u\n", SmbiosTable->MajorVersion, SmbiosTable->MinorVersion);
         Smbios.Hdr = (SMBIOS_HEADER*)(UINTN)SmbiosTable->TableAddress;
     }
 
@@ -93,35 +125,87 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     /*
      * Set boot device based on WakeUpType
      */
-    EFI_GUID GlobalVariable = EFI_GLOBAL_VARIABLE; // GUID for UEFI boot values
-    UINT16 BootNext = 0;
+    EFI_GUID Vendor_GUID = { 0x1BE4DF61, 0x93CA, 0x11d2, {0xAA, 0x0D, 0x00, 0xE0, 0x98, 0x03, 0x2B, 0x8C} };
+    CHAR16 *BootNext = 0;
+    UINTN BootMappingSize = 0;
+    CHAR16 *BootMapping;
+    
+    // Get Wake-up Type to Boot Option mapping
+    BootMapping = LibGetVariableAndSize(L"TestVar", &Vendor_GUID, &BootMappingSize);
+    // BootMapping = L"null eins zwei drei vier fünf sechs sieben acht";
+    if(!BootMapping) {
+      Print(L"Could not get Boot Mapping\n");
+      CALL(EFI_ABORTED);
+    }
+    
+    CHAR16 *BootMappingWords[9];
+    int wordCount = 0;
+    
+    SplitStringToWords(BootMapping, BootMappingWords, &wordCount);
+    
+    for (int i = 0; i < wordCount; i++) {
+      Print(L"Wake-up Type 0x%02x : Bootfile %s\n", i, BootMappingWords[i]);
+    }
+    
+    BootNext = BootMappingWords[WakeUpType];
+    Print(L"BootNext: %s\n", BootNext);
+    
+    EFI_GUID DiskGuid = { 0x10cf4871, 0xc6e0, 0x4216, { 0xb9, 0xe0, 0xb5, 0xd4, 0x17, 0xe3, 0x40, 0x86 } };
+    
+    EFI_HANDLE *DiskHandles;
+    UINTN HandleCount;
+    EFI_DEVICE_PATH *DevicePath;
 
-    if (WakeUpType == 0x06) {
-        BootNext = 0x0001; // Ubuntu
-    } else {
-        BootNext = 0x0000; // Windows
+    CALL(LibLocateHandleByDiskSignature(MBR_TYPE_EFI_PARTITION_TABLE_HEADER, SIGNATURE_TYPE_GUID, &DiskGuid, &HandleCount, &DiskHandles));
+
+    Print(L"Found %d EFI partitions\n", HandleCount);
+    
+    if (HandleCount != 1) {
+      Print(L"Found %d EFI partitions, but expected 1\n", HandleCount);
+      CALL(EFI_ABORTED);
+    }
+    
+    if (!DiskHandles) {
+      Print(L"Failed to locate EFI partition!\n");
+      CALL(EFI_NOT_FOUND);
+    }
+    
+    // Erstelle einen Gerätepfad aus dem Handle
+    DevicePath = DevicePathFromHandle(DiskHandles[0]);
+    if (!DevicePath) {
+        Print(L"Failed to create device path!\n");
+        CALL(EFI_NOT_FOUND);
     }
 
-    // Set BootNext variable
-     CALL(ST->RuntimeServices->SetVariable(
-        L"BootNext",
-        &GlobalVariable,
-        EFI_VARIABLE_NON_VOLATILE |
-        EFI_VARIABLE_BOOTSERVICE_ACCESS |
-        EFI_VARIABLE_RUNTIME_ACCESS,
-        sizeof(BootNext),
-        &BootNext   // new value
+    // Konvertiere und drucke den Gerätepfad in eine UTF-16-String-Repräsentation
+    Print(L"Device Path: %s\n", DevicePathToStr(DevicePath));
+
+    EFI_DEVICE_PATH *FilePath = FileDevicePath(DiskHandles[0], BootNext);
+    if (!FilePath) {
+        Print(L"Unable to build file path.\n");
+        CALL(EFI_NOT_FOUND);
+    }
+
+    Print(L"Loading: %s\n", DevicePathToStr(FilePath));
+    
+    EFI_HANDLE LoadedImageHandle;
+    
+    CALL(
+        SystemTable->BootServices->LoadImage(
+        FALSE,				// BootPolicy
+        ImageHandle,		// ParentImageHandle
+        FilePath,			// DevicePath
+        NULL,				// SourceBuffer
+        0,					// SourceSize
+        &LoadedImageHandle  // ImageHandle
     ));
-
-    Print(L"Set BootNext to 0x%04x\n", BootNext);
-
-    // Reboot
-    CALL(ST->RuntimeServices->ResetSystem(
-                EfiResetCold,
-                EFI_SUCCESS,
-                0,
-                NULL
-            )); 
+    
+    CALL(
+        SystemTable->BootServices->StartImage(
+        LoadedImageHandle,
+        NULL,
+        NULL
+    ));
 
     return EFI_SUCCESS;
 }
