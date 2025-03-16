@@ -14,6 +14,7 @@
         EFI_INPUT_KEY Key;                                                              \
         if (Status != EFI_SUCCESS)                                                      \
         {                                                                               \
+			Print(L"EFI Error: %r\n", Status);											\
             Print(L"Error in file: %a\n", __FILE__);                               		\
             Print(L"Error in line: %d\n", __LINE__);                                    \
             Print(L"Error in call: %a\n", #call);                                       \
@@ -97,7 +98,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         Print(L"SMBIOS Entry Point Revision: %u\n", Smbios3Table->EntryPointRevision);
     } else {
         CALL(LibGetSystemConfigurationTable(&SMBIOSTableGuid, (VOID**)&SmbiosTable));
-        Print(L"Major SMBIOS Version: %u\n", SmbiosTable->MajorVersion);
+        Print(L"SMBIOS Version: %u - %u\n", SmbiosTable->MajorVersion, SmbiosTable->MinorVersion);
         Smbios.Hdr = (SMBIOS_HEADER*)(UINTN)SmbiosTable->TableAddress;
     }
 
@@ -125,13 +126,13 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
      * Set boot device based on WakeUpType
      */
     EFI_GUID Vendor_GUID = { 0x1BE4DF61, 0x93CA, 0x11d2, {0xAA, 0x0D, 0x00, 0xE0, 0x98, 0x03, 0x2B, 0x8C} };
-    CHAR16 BootNext = 0;
+    CHAR16 *BootNext = 0;
     UINTN BootMappingSize = 0;
     CHAR16 *BootMapping;
     
     // Get Wake-up Type to Boot Option mapping
-    BootMapping = LibGetVariableAndSize(L"WakeUpType", &Vendor_GUID, &BootMappingSize);
-    //BootMapping = L"null eins zwei drei vier fünf sechs sieben acht";
+    BootMapping = LibGetVariableAndSize(L"TestVar", &Vendor_GUID, &BootMappingSize);
+    // BootMapping = L"null eins zwei drei vier fünf sechs sieben acht";
     if(!BootMapping) {
       Print(L"Could not get Boot Mapping\n");
       CALL(EFI_ABORTED);
@@ -146,42 +147,57 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
       Print(L"Wake-up Type 0x%02x : Bootfile %s\n", i, BootMappingWords[i]);
     }
     
-    BootNext = *BootMappingWords[WakeUpType];
+    BootNext = BootMappingWords[WakeUpType];
     Print(L"BootNext: %s\n", BootNext);
     
-    EFI_HANDLE LoadedImageHandle;
-    EFI_LOADED_IMAGE_PROTOCOL *LoadedImage;
+    EFI_GUID DiskGuid = { 0x10cf4871, 0xc6e0, 0x4216, { 0xb9, 0xe0, 0xb5, 0xd4, 0x17, 0xe3, 0x40, 0x86 } };
+    
+    EFI_HANDLE *DiskHandles;
+    UINTN HandleCount;
     EFI_DEVICE_PATH *DevicePath;
+
+    CALL(LibLocateHandleByDiskSignature(MBR_TYPE_EFI_PARTITION_TABLE_HEADER, SIGNATURE_TYPE_GUID, &DiskGuid, &HandleCount, &DiskHandles));
+
+    Print(L"Found %d EFI partitions\n", HandleCount);
     
-    // Get the loaded image protocol for the current image
-    CALL(
-        SystemTable->BootServices->OpenProtocol(
-        ImageHandle,
-        &LoadedImageProtocol,
-        (VOID **)&LoadedImage,
-        ImageHandle,
-        NULL,
-        EFI_OPEN_PROTOCOL_GET_PROTOCOL
-    ));
-    
-    DevicePath = FileDevicePath(
-        LoadedImage->DeviceHandle,
-        &BootNext
-    );
-    
-    if (!DevicePath) {
-      Print(L"Could not get Device Path\n");
+    if (HandleCount != 1) {
+      Print(L"Found %d EFI partitions, but expected 1\n", HandleCount);
       CALL(EFI_ABORTED);
     }
     
+    if (!DiskHandles) {
+      Print(L"Failed to locate EFI partition!\n");
+      CALL(EFI_NOT_FOUND);
+    }
+    
+    // Erstelle einen Gerätepfad aus dem Handle
+    DevicePath = DevicePathFromHandle(DiskHandles[0]);
+    if (!DevicePath) {
+        Print(L"Failed to create device path!\n");
+        CALL(EFI_NOT_FOUND);
+    }
+
+    // Konvertiere und drucke den Gerätepfad in eine UTF-16-String-Repräsentation
+    Print(L"Device Path: %s\n", DevicePathToStr(DevicePath));
+
+    EFI_DEVICE_PATH *FilePath = FileDevicePath(DiskHandles[0], BootNext);
+    if (!FilePath) {
+        Print(L"Unable to build file path.\n");
+        CALL(EFI_NOT_FOUND);
+    }
+
+    Print(L"Loading: %s\n", DevicePathToStr(FilePath));
+    
+    EFI_HANDLE LoadedImageHandle;
+    
     CALL(
         SystemTable->BootServices->LoadImage(
-        FALSE,
-        ImageHandle,
-        DevicePath,
-        NULL,
-        0,
-        &LoadedImageHandle
+        FALSE,				// BootPolicy
+        ImageHandle,		// ParentImageHandle
+        FilePath,			// DevicePath
+        NULL,				// SourceBuffer
+        0,					// SourceSize
+        &LoadedImageHandle  // ImageHandle
     ));
     
     CALL(
@@ -190,27 +206,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         NULL,
         NULL
     ));
-
-    // Set BootNext variable
-    /* CALL(ST->RuntimeServices->SetVariable(
-        L"BootNext",
-        &GlobalVariable,
-        EFI_VARIABLE_NON_VOLATILE |
-        EFI_VARIABLE_BOOTSERVICE_ACCESS |
-        EFI_VARIABLE_RUNTIME_ACCESS,
-        sizeof(BootNext),
-        &BootNext   // new value
-    ));
-
-    Print(L"Set BootNext to 0x%04x\n", BootNext);
-
-    // Reboot
-    CALL(ST->RuntimeServices->ResetSystem(
-                EfiResetCold,
-                EFI_SUCCESS,
-                0,
-                NULL
-            )); */
 
     return EFI_SUCCESS;
 }
