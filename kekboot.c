@@ -129,7 +129,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
      * Set boot device based on WakeUpType
      */
     EFI_GUID Vendor_GUID = { 0x1BE4DF61, 0x93CA, 0x11d2, {0xAA, 0x0D, 0x00, 0xE0, 0x98, 0x03, 0x2B, 0x8C} };
-    CHAR16 *BootNext = 0;
     UINTN BootMappingSize = 0;
     CHAR16 *BootMapping;
     
@@ -140,19 +139,25 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
       CALL(EFI_ABORTED);
     }
     
-    CHAR16 *BootMappingWords[9];
-    int wordCount = 0;
+    CHAR16 *BootMappingLines[9];
+    int lineCount = 0;
     
-    SplitStringToWords(L' ', 9, BootMapping, BootMappingWords, &wordCount);
+    SplitStringToWords(L' ', 9, BootMapping, BootMappingLines, &lineCount);
     
     // Mapping for debugging purposes
-    for (int i = 0; i < wordCount; i++) {
-      Print(L"Wake-up Type 0x%02x : Bootfile %s\n", i, BootMappingWords[i]);
+    for (int i = 0; i < lineCount; i++) {
+      Print(L"Wake-up Type 0x%02x : Bootfile %s\n", i, BootMappingLines[i]);
     }
     
-    // The actual mapping
-    BootNext = BootMappingWords[WakeUpType];
-    Print(L"BootNext: %s\n", BootNext);
+    CHAR16 *efiFileLocation = BootMappingLines[WakeUpType];
+    
+    CHAR16 *BootMappingConfig[2];
+    int configCount = 0;
+    
+    SplitStringToWords(L'=', 2, efiFileLocation, BootMappingConfig, &configCount);
+   
+    CHAR16 *BootFile = BootMappingConfig[1];
+    Print(L"BootNext: %s\n", BootFile);
     
     // The GUID of the EFI partition to load
     // TODO Replace hardcoded GUID against efivar configuration
@@ -187,7 +192,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     Print(L"Device Path: %s\n", DevicePathToStr(DevicePath));
 
     // Get file path of EFI application to chainload
-    EFI_DEVICE_PATH *FilePath = FileDevicePath(DiskHandles[0], BootNext);
+    EFI_DEVICE_PATH *FilePath = FileDevicePath(DiskHandles[0], BootFile);
     if (!FilePath) {
         Print(L"Unable to build file path.\n");
         CALL(EFI_NOT_FOUND);
